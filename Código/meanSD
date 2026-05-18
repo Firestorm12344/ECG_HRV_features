@@ -1,0 +1,204 @@
+from Functions import *
+
+import os
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+
+# ============================================================
+# CONFIG
+# ============================================================
+
+processed_dir = "Processed_Data"
+results_dir = "Results/comparison/figures_mean_sd"
+
+fs = 500
+lead_index = 1
+
+features_plot = ["RR_mean", "SDRR", "RMSSD"]
+class_order = ["SR", "AF", "ST", "SB"]
+dataset_order = ["D1", "D2"]
+
+os.makedirs(results_dir, exist_ok=True)
+
+# ============================================================
+# DETECTOR
+# ============================================================
+
+def detect_r_threshold(ecg, fs=500):
+    ecg = preprocess_ecg_for_hrv(
+        ecg,
+        use_wavelet=True,
+        normalize=True
+    )
+
+    upper_threshold = 0.60
+    lower_threshold = 0.45
+
+    ignore_reading = False
+    peaks = []
+
+    for i, value in enumerate(ecg):
+        if value >= upper_threshold and not ignore_reading:
+            peaks.append(i)
+            ignore_reading = True
+
+        if value < lower_threshold:
+            ignore_reading = False
+
+    min_distance = int(0.25 * fs)
+
+    filtered_peaks = []
+    last_peak = -999999
+
+    for p in peaks:
+        if p - last_peak >= min_distance:
+            filtered_peaks.append(p)
+            last_peak = p
+
+    return np.array(filtered_peaks, dtype=int)
+
+# ============================================================
+# HRV
+# ============================================================
+
+def compute_hrv(ecg, fs=500):
+    peaks = detect_r_threshold(ecg, fs=fs)
+
+    if len(peaks) < 2:
+        return [np.nan, np.nan, np.nan]
+
+    rr = np.diff(peaks) / fs
+    rr = rr[(rr > 0.30) & (rr < 2.50)]
+
+    if len(rr) < 1:
+        return [np.nan, np.nan, np.nan]
+
+    rr_diff = np.abs(np.diff(rr))
+
+    rr_mean = np.mean(rr)
+    sdrr = np.std(rr, ddof=1) if len(rr) > 1 else 0.0
+    rmssd = np.sqrt(np.mean(rr_diff ** 2)) if len(rr_diff) > 0 else 0.0
+
+    return [rr_mean, sdrr, rmssd]
+
+# ============================================================
+# BUILD DATAFRAME
+# ============================================================
+
+def build_df(dataset_id, dataset_name):
+    X, y = load_dataset_all(
+        processed_dir=processed_dir,
+        dataset=dataset_id
+    )
+
+    rows = []
+
+    for idx in range(len(X)):
+        ecg = X[idx, :, lead_index]
+        rrmean, sdrr, rmssd = compute_hrv(ecg, fs=fs)
+
+        rows.append({
+            "dataset": dataset_name,
+            "label": int(y[idx]),
+            "class": CLASS_NAMES[int(y[idx])],
+            "RR_mean": rrmean,
+            "SDRR": sdrr,
+            "RMSSD": rmssd,
+        })
+
+    return pd.DataFrame(rows)
+
+# ============================================================
+# LOAD DATASETS
+# ============================================================
+
+print("\n====================")
+print("LOADING D1")
+print("====================")
+df1 = build_df(dataset_id=1, dataset_name="D1")
+
+print("\n====================")
+print("LOADING D2")
+print("====================")
+df2 = build_df(dataset_id=2, dataset_name="D2")
+
+df_all = pd.concat([df1, df2], ignore_index=True)
+
+# ============================================================
+# PRINT MEAN ± SD
+# ============================================================
+
+print("\n================================================")
+print("MEAN ± SD SUMMARY")
+print("================================================")
+
+summary_table = (
+    df_all
+    .groupby(["dataset", "class"])[features_plot]
+    .agg(["mean", "std", "count"])
+)
+
+print(summary_table)
+summary_table.to_csv("Results/comparison/mean_sd_summary.csv")
+
+# ============================================================
+# PLOTS: MEAN ± SD
+# ============================================================
+
+for feature in features_plot:
+    summary = (
+        df_all
+        .groupby(["class", "dataset"])[feature]
+        .agg(["mean", "std"])
+        .reset_index()
+    )
+
+    x = np.arange(len(class_order))
+    width = 0.35
+
+    plt.figure(figsize=(7, 4))
+
+    for i, ds in enumerate(dataset_order):
+        vals = []
+        errs = []
+
+        for cls in class_order:
+            row = summary[
+                (summary["class"] == cls) &
+                (summary["dataset"] == ds)
+            ]
+
+            if row.empty:
+                vals.append(np.nan)
+                errs.append(0)
+            else:
+                vals.append(row["mean"].values[0])
+                errs.append(row["std"].values[0])
+
+        offset = (i - 0.5) * width
+
+        plt.bar(
+            x + offset,
+            vals,
+            width,
+            yerr=errs,
+            capsize=4,
+            label=ds
+        )
+
+    plt.xticks(x, class_order)
+    plt.xlabel("Rhythm class")
+    plt.ylabel(feature)
+    plt.title(f"{feature} mean ± SD")
+    plt.legend(title="Dataset")
+    plt.grid(axis="y", alpha=0.3)
+    plt.tight_layout()
+
+    save_path = os.path.join(results_dir, f"{feature}_mean_sd.png")
+    plt.savefig(save_path, dpi=300)
+    plt.close()
+
+    print("Saved:", save_path)
+
+print("\nDone.")
