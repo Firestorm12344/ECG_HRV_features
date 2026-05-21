@@ -112,9 +112,19 @@ def effect_size_pairwise(df, dataset_name, save_dir):
             })
 
     out = pd.DataFrame(rows)
+    make_dir(save_dir)
 
     print(f"\n===== {dataset_name} PAIRWISE EFFECT SIZE =====")
-    print(out)
+    with pd.option_context(
+        'display.max_rows', None,
+        'display.max_columns', None,
+        'display.width', 200,
+        'display.expand_frame_repr', False
+    ):
+        print(out)
+
+    out.to_csv(os.path.join(save_dir, f"{dataset_name}_pairwise_effect_size.csv"), index=False)
+    print(f"Pairwise effect size table saved en: {os.path.join(save_dir, f'{dataset_name}_pairwise_effect_size.csv')}")
 
     return out
 
