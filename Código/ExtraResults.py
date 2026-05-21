@@ -1,4 +1,5 @@
 from Functions import *
+
 import os
 import itertools
 import numpy as np
@@ -12,6 +13,7 @@ from sklearn.impute import SimpleImputer
 from sklearn.preprocessing import StandardScaler
 from sklearn.linear_model import LogisticRegression
 from sklearn.ensemble import RandomForestClassifier
+
 from sklearn.metrics import (
     confusion_matrix,
     classification_report,
@@ -23,6 +25,9 @@ from sklearn.metrics import (
 # ============================================================
 # CONFIG
 # ============================================================
+
+ROOT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), os.pardir))
+DEFAULT_EXTRA_RESULTS_DIR = os.path.join(ROOT_DIR, "Results", "extra_results")
 
 FEATURES = ["RR_mean", "SDRR", "RMSSD", "NN50", "pNN50"]
 CLASS_ORDER = [0, 1, 2, 3]
@@ -58,7 +63,10 @@ def cohens_d(x1, x2):
     s1 = np.var(x1, ddof=1)
     s2 = np.var(x2, ddof=1)
 
-    pooled = np.sqrt(((n1 - 1) * s1 + (n2 - 1) * s2) / (n1 + n2 - 2))
+    pooled = np.sqrt(
+        ((n1 - 1) * s1 + (n2 - 1) * s2) /
+        (n1 + n2 - 2)
+    )
 
     if pooled == 0:
         return np.nan
@@ -71,13 +79,10 @@ def cohens_d(x1, x2):
 # ============================================================
 
 def effect_size_pairwise(df, dataset_name, save_dir):
-    make_dir(save_dir)
-
     rows = []
     labels = sorted(df["label"].unique())
     pairs = list(itertools.combinations(labels, 2))
-    n_pairs = len(pairs)
-    n_tests = n_pairs * len(FEATURES)
+    n_tests = len(pairs) * len(FEATURES)
 
     for feature in FEATURES:
         for c1, c2 in pairs:
@@ -107,12 +112,9 @@ def effect_size_pairwise(df, dataset_name, save_dir):
             })
 
     out = pd.DataFrame(rows)
-    out.to_csv(os.path.join(save_dir, f"{dataset_name}_pairwise_effect_size.csv"), index=False)
 
-    print(f"\n=== EFFECT SIZE PAIRWISE {dataset_name} ===")
-    print("Tamaño del efecto (Cohen's d) para cada par de clases y característica:")
-    print(out.head(10))  # Muestra las primeras 10 filas para no saturar el log
-    print("(Resultados completos guardados en CSV)")
+    print(f"\n===== {dataset_name} PAIRWISE EFFECT SIZE =====")
+    print(out)
 
     return out
 
@@ -161,7 +163,9 @@ def auc_ranking(df, dataset_name, save_dir):
         })
 
     out = pd.DataFrame(rows)
-    out.to_csv(os.path.join(save_dir, f"{dataset_name}_auc_ranking.csv"), index=False)
+
+    print(f"\n===== {dataset_name} AUC RANKING =====")
+    print(out)
 
     rank = out[out["class"] == "mean"].sort_values("auc_ovr", ascending=False)
 
@@ -172,7 +176,10 @@ def auc_ranking(df, dataset_name, save_dir):
     plt.title(f"{dataset_name} - Feature AUC Ranking")
     plt.xticks(rotation=45)
     plt.tight_layout()
-    plt.savefig(os.path.join(save_dir, f"{dataset_name}_auc_ranking.png"), dpi=300)
+    plt.savefig(
+        os.path.join(save_dir, f"{dataset_name}_auc_ranking.png"),
+        dpi=300
+    )
     plt.close()
 
     return out
@@ -234,7 +241,6 @@ def model_error_analysis(df, dataset_name, save_dir):
             "f1_macro": f1
         })
 
-        # Classification report
         report = classification_report(
             y_test,
             y_pred,
@@ -244,15 +250,18 @@ def model_error_analysis(df, dataset_name, save_dir):
             zero_division=0
         )
 
-        pd.DataFrame(report).transpose().to_csv(
-            os.path.join(save_dir, f"{dataset_name}_{model_name}_classification_report.csv")
-        )
-
-        # Confusion matrix
         cm = confusion_matrix(y_test, y_pred, labels=CLASS_ORDER)
 
-        cm_df = pd.DataFrame(cm, index=CLASS_LABELS, columns=CLASS_LABELS)
-        cm_df.to_csv(os.path.join(save_dir, f"{dataset_name}_{model_name}_confusion_matrix.csv"))
+        cm_df = pd.DataFrame(
+            cm,
+            index=CLASS_LABELS,
+            columns=CLASS_LABELS
+        )
+
+        print(f"\n===== {dataset_name} {model_name} CLASSIFICATION REPORT =====")
+        print(pd.DataFrame(report).transpose())
+        print(f"\n===== {dataset_name} {model_name} CONFUSION MATRIX =====")
+        print(cm_df)
 
         plt.figure(figsize=(6, 5))
         plt.imshow(cm)
@@ -268,10 +277,15 @@ def model_error_analysis(df, dataset_name, save_dir):
 
         plt.colorbar()
         plt.tight_layout()
-        plt.savefig(os.path.join(save_dir, f"{dataset_name}_{model_name}_confusion_matrix.png"), dpi=300)
+        plt.savefig(
+            os.path.join(
+                save_dir,
+                f"{dataset_name}_{model_name}_confusion_matrix.png"
+            ),
+            dpi=300
+        )
         plt.close()
 
-        # Error table
         err = pd.DataFrame({
             "y_true": y_test,
             "y_pred": y_pred
@@ -288,13 +302,12 @@ def model_error_analysis(df, dataset_name, save_dir):
             .sort_values("n_errors", ascending=False)
         )
 
-        err_table.to_csv(
-            os.path.join(save_dir, f"{dataset_name}_{model_name}_error_analysis.csv"),
-            index=False
-        )
+        print(f"\n===== {dataset_name} {model_name} ERROR ANALYSIS =====")
+        print(err_table)
 
     summary_df = pd.DataFrame(summary)
-    summary_df.to_csv(os.path.join(save_dir, f"{dataset_name}_model_summary.csv"), index=False)
+    print(f"\n===== {dataset_name} MODEL SUMMARY =====")
+    print(summary_df)
 
     return summary_df
 
@@ -308,7 +321,6 @@ def feature_importance(df, dataset_name, save_dir):
 
     X, y = clean_feature_matrix(df, FEATURES)
 
-    # Random Forest
     rf = Pipeline([
         ("imputer", SimpleImputer(strategy="median")),
         ("clf", RandomForestClassifier(
@@ -328,7 +340,8 @@ def feature_importance(df, dataset_name, save_dir):
         "importance": rf_imp
     }).sort_values("importance", ascending=False)
 
-    rf_df.to_csv(os.path.join(save_dir, f"{dataset_name}_RF_feature_importance.csv"), index=False)
+    print(f"\n===== {dataset_name} RF FEATURE IMPORTANCE =====")
+    print(rf_df)
 
     plt.figure(figsize=(6, 4))
     plt.bar(rf_df["feature"], rf_df["importance"])
@@ -336,10 +349,12 @@ def feature_importance(df, dataset_name, save_dir):
     plt.title(f"{dataset_name} - RF Feature Importance")
     plt.xticks(rotation=45)
     plt.tight_layout()
-    plt.savefig(os.path.join(save_dir, f"{dataset_name}_RF_feature_importance.png"), dpi=300)
+    plt.savefig(
+        os.path.join(save_dir, f"{dataset_name}_RF_feature_importance.png"),
+        dpi=300
+    )
     plt.close()
 
-    # Logistic Regression
     lr = Pipeline([
         ("imputer", SimpleImputer(strategy="median")),
         ("scaler", StandardScaler()),
@@ -354,8 +369,14 @@ def feature_importance(df, dataset_name, save_dir):
 
     coefs = lr.named_steps["clf"].coef_
 
-    lr_df = pd.DataFrame(coefs, columns=FEATURES, index=CLASS_LABELS)
-    lr_df.to_csv(os.path.join(save_dir, f"{dataset_name}_LR_coefficients.csv"))
+    lr_df = pd.DataFrame(
+        coefs,
+        columns=FEATURES,
+        index=CLASS_LABELS
+    )
+
+    print(f"\n===== {dataset_name} LR COEFFICIENTS =====")
+    print(lr_df)
 
     return rf_df, lr_df
 
@@ -415,17 +436,29 @@ def minimal_feature_analysis(df, dataset_name, save_dir):
                 "n_features": k,
                 "features_used": ", ".join(selected),
                 "accuracy": accuracy_score(y_test, y_pred),
-                "f1_macro": f1_score(y_test, y_pred, average="macro", zero_division=0)
+                "f1_macro": f1_score(
+                    y_test,
+                    y_pred,
+                    average="macro",
+                    zero_division=0
+                )
             })
 
     out = pd.DataFrame(rows)
-    out.to_csv(os.path.join(save_dir, f"{dataset_name}_minimal_feature_analysis.csv"), index=False)
+
+    print(f"\n===== {dataset_name} MINIMAL FEATURE ANALYSIS =====")
+    print(out)
 
     plt.figure(figsize=(7, 5))
 
     for model_name in out["model"].unique():
         temp = out[out["model"] == model_name]
-        plt.plot(temp["n_features"], temp["f1_macro"], marker="o", label=model_name)
+        plt.plot(
+            temp["n_features"],
+            temp["f1_macro"],
+            marker="o",
+            label=model_name
+        )
 
     plt.xlabel("Number of features")
     plt.ylabel("Macro F1-score")
@@ -434,7 +467,10 @@ def minimal_feature_analysis(df, dataset_name, save_dir):
     plt.grid(alpha=0.3)
     plt.legend()
     plt.tight_layout()
-    plt.savefig(os.path.join(save_dir, f"{dataset_name}_minimal_feature_analysis.png"), dpi=300)
+    plt.savefig(
+        os.path.join(save_dir, f"{dataset_name}_minimal_feature_analysis.png"),
+        dpi=300
+    )
     plt.close()
 
     return out
@@ -445,7 +481,7 @@ def minimal_feature_analysis(df, dataset_name, save_dir):
 # ============================================================
 
 def histograms_by_class(df, dataset_name, save_dir):
-    hist_dir = os.path.join(save_dir, "histograms")
+    hist_dir = save_dir
     make_dir(hist_dir)
 
     for feature in FEATURES:
@@ -461,7 +497,10 @@ def histograms_by_class(df, dataset_name, save_dir):
         plt.ylabel("Frequency")
         plt.legend()
         plt.tight_layout()
-        plt.savefig(os.path.join(hist_dir, f"{dataset_name}_{feature}_histogram.png"), dpi=300)
+        plt.savefig(
+            os.path.join(hist_dir, f"{dataset_name}_{feature}_histogram.png"),
+            dpi=300
+        )
         plt.close()
 
 
@@ -469,7 +508,7 @@ def histograms_by_class(df, dataset_name, save_dir):
 # 7. COMPARACIÓN D1 VS D2
 # ============================================================
 
-def compare_datasets(df1, df2, save_dir):
+def compare_datasets(df1, df2, save_dir, name1="D1", name2="D2"):
     make_dir(save_dir)
 
     rows = []
@@ -489,18 +528,20 @@ def compare_datasets(df1, df2, save_dir):
             rows.append({
                 "feature": feature,
                 "class": CLASS_NAMES[int(cls)],
-                "D1_median": np.nanmedian(x1) if len(x1) else np.nan,
-                "D2_median": np.nanmedian(x2) if len(x2) else np.nan,
-                "D1_mean": np.nanmean(x1) if len(x1) else np.nan,
-                "D2_mean": np.nanmean(x2) if len(x2) else np.nan,
+                f"{name1}_median": np.nanmedian(x1) if len(x1) else np.nan,
+                f"{name2}_median": np.nanmedian(x2) if len(x2) else np.nan,
+                f"{name1}_mean": np.nanmean(x1) if len(x1) else np.nan,
+                f"{name2}_mean": np.nanmean(x2) if len(x2) else np.nan,
                 "mannwhitney_U": U,
                 "p_value": p,
-                "cohens_d_D1_vs_D2": d,
+                f"cohens_d_{name1}_vs_{name2}": d,
                 "abs_cohens_d": abs(d)
             })
 
     out = pd.DataFrame(rows)
-    out.to_csv(os.path.join(save_dir, "D1_vs_D2_feature_distribution_shift.csv"), index=False)
+
+    print(f"\n===== {name1} vs {name2} FEATURE DISTRIBUTION SHIFT =====")
+    print(out)
 
     return out
 
@@ -509,8 +550,9 @@ def compare_datasets(df1, df2, save_dir):
 # 8. EJECUCIÓN GENERAL
 # ============================================================
 
-def run_complete_extra_results(df, dataset_name, base_dir="Results/extra_results"):
-    save_dir = os.path.join(base_dir, dataset_name)
+def run_complete_extra_results(df, dataset_name, base_dir=DEFAULT_EXTRA_RESULTS_DIR):
+
+    save_dir = base_dir
     make_dir(save_dir)
 
     print(f"\n========== EXTRA RESULTS {dataset_name} ==========")
@@ -525,12 +567,12 @@ def run_complete_extra_results(df, dataset_name, base_dir="Results/extra_results
     print(f"Resultados extra guardados en: {save_dir}")
 
 
-def run_all_extra_results(df1, df2, base_dir="Results/extra_results"):
-    run_complete_extra_results(df1, "D1", base_dir)
-    run_complete_extra_results(df2, "D2", base_dir)
+def run_all_extra_results(df1, df2, base_dir=DEFAULT_EXTRA_RESULTS_DIR, name1="D1", name2="D2"):
 
-    compare_dir = os.path.join(base_dir, "comparison")
-    compare_datasets(df1, df2, compare_dir)
+    run_complete_extra_results(df1, name1, base_dir)
+    run_complete_extra_results(df2, name2, base_dir)
+
+    compare_datasets(df1, df2, base_dir, name1=name1, name2=name2)
 
     print("\n========== EXTRA ANALYSIS COMPLETO ==========")
-    print(f"Resultados guardados en: {base_dir}")
+    print(f"Resultados extra guardados en: {base_dir}")

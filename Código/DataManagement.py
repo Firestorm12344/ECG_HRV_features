@@ -1,15 +1,20 @@
 import numpy as np
 import os
 
-from Functions import get_diag, get_der, sep_data_stratified, save_dataset_splits, is_valid_signal_triplet
+from Functions import (
+    sep_data_stratified,
+    save_dataset_splits,
+    is_valid_signal_triplet,
+    CLASS_NAMES
+)
 
-# ============================  
+# ============================
 # CONFIGURACIÓN
 # ============================
 
-data = 2  # Cambia a 2 para el segundo dataset
+data = 3
 
-N = 10000
+N = 5000
 Num_signals = 2000
 save_dir = "Processed_Data"
 
@@ -17,44 +22,38 @@ save_dir = "Processed_Data"
 # CARGA DE DATOS
 # ============================
 
-if data == 1:
-    sig = np.load("Processed_Data/signals.npy")
-    met = np.load("Processed_Data/metadata.npy", allow_pickle=True)
-    suffix = "1"
+sig = np.load(f"Processed_Data/signals{data}.npy")
+y = np.load(f"Processed_Data/labels{data}.npy")
 
-elif data == 2:
-    sig = np.load("Processed_Data/signals2.npy")
-    met = np.load("Processed_Data/metadata2.npy", allow_pickle=True)
-    suffix = "2"
+suffix = str(data)
 
-else:
-    raise ValueError("data debe ser 1 o 2")
-
-print("Shape signals:", np.shape(sig))
+print("Shape signals:", sig.shape)
+print("Shape labels:", y.shape)
 
 # ============================
-# OBTENER DIAGNÓSTICOS
+# EXTRAER DERIVACIONES
 # ============================
 
-Pl, acro, freq = get_diag(sig, met)
+I = sig[:, 0:N, 0]
+II = sig[:, 0:N, 1]
+aVR = sig[:, 0:N, 2]
 
-print("Frecuencia por clase [SR, AF, ST, SB]:", freq)
-
-# ============================
-# OBTENER DERIVACIONES
-# ============================
-
-I, II, aVR, y = get_der(Pl)
-
-I = np.array(I)[:, 0:N]
-II = np.array(II)[:, 0:N]
-aVR = np.array(aVR)[:, 0:N]
-y = np.array(y)
+y = np.array(y, dtype=np.int32)
 
 print("I:", I.shape)
 print("II:", II.shape)
 print("aVR:", aVR.shape)
 print("y:", y.shape)
+
+# ============================
+# FRECUENCIA INICIAL
+# ============================
+
+unique, counts = np.unique(y, return_counts=True)
+
+print("\nFrecuencia inicial:")
+for cls, count in zip(unique, counts):
+    print(CLASS_NAMES[int(cls)], ":", count)
 
 # ============================
 # BALANCEAR POR CLASE
@@ -68,12 +67,14 @@ y_list = []
 quality_report = {}
 
 for cls in np.unique(y):
+
     idx_cls = np.where(y == cls)[0]
 
     selected = []
     discarded = 0
 
     for idx in idx_cls:
+
         if is_valid_signal_triplet(I[idx], II[idx], aVR[idx]):
             selected.append(idx)
         else:
@@ -91,7 +92,10 @@ for cls in np.unique(y):
     }
 
     if len(selected) < Num_signals:
-        print(f"ADVERTENCIA: Clase {cls} solo tiene {len(selected)} señales válidas.")
+        print(
+            f"ADVERTENCIA: Clase {CLASS_NAMES[int(cls)]} "
+            f"solo tiene {len(selected)} señales válidas."
+        )
 
     I_list.append(I[selected])
     II_list.append(II[selected])
@@ -106,7 +110,7 @@ y_balanced = np.concatenate(y_list, axis=0)
 print("\n===== REPORTE DE CALIDAD =====")
 for cls, rep in quality_report.items():
     print(
-        f"Clase {cls}: seleccionadas={rep['selected']}, "
+        f"{CLASS_NAMES[int(cls)]}: seleccionadas={rep['selected']}, "
         f"descartadas={rep['discarded_before_reaching_target']}, "
         f"objetivo={rep['target']}"
     )
@@ -123,11 +127,6 @@ print("Distribución final:", dict(zip(unique, counts)))
 # ============================
 # SEPARACIÓN ESTRATIFICADA
 # ============================
-print("ANTES DE SPLIT")
-print("I_balanced:", I_balanced.shape)
-print("II_balanced:", II_balanced.shape)
-print("aVR_balanced:", aVR_balanced.shape)
-print("y_balanced:", y_balanced.shape)
 
 splits = sep_data_stratified(
     I=I_balanced,

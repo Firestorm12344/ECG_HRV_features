@@ -30,6 +30,7 @@ import os
 import matplotlib.pyplot as plt
 import seaborn as sns
 import pandas as pd
+import wfdb
 
 from sklearn.metrics import (
     roc_auc_score,
@@ -208,24 +209,78 @@ def extract_hrv(ecg, fs=500, use_wavelet=True):
         pNN50
     ]
 
+# ------------------------------- DATA PROCESSING ------------------------------- #
+
+def get_signals(path, num_Sig):
+    signals = []
+    all_meta = []  # To store metadata for each signal
+    i = 0
+    # Walk through all directories and subdirectories
+    for root, dirs, files in os.walk(path):
+        for filename in files:
+            if i<=num_Sig:
+                if filename.endswith('.hea'):
+                    base_filename = filename[:-4]
+                    hea_filepath = os.path.join(root, base_filename)
+                    
+                    try:
+                        
+                        # Read the .hea file using wfdb.rdsamp
+                        signal, meta = wfdb.rdsamp(hea_filepath)
+                        signals.append(signal)
+                        all_meta.append(meta)   
+                        i+=1
+                    except Exception as e:
+                        print(f"Failed to read {hea_filepath}: {e}")
+    return signals, all_meta
+
+
+
+def getSingle_sigs(class_signal_number, signals, all_meta):
+    class_signal = [class_signal_number]
+    sig_list = []
+
+    for i in range(len(all_meta)):
+        diagnostics = all_meta[i]["comments"][2].split(" ")[1].split(",")
+        for k in diagnostics:
+            k_int = int(k)
+            if k_int in class_signal:
+                ind_signal = [signals[i]]
+                sig_list.append(ind_signal)
+
+    return sig_list
 def get_diag(signals, all_meta, csv_file="Nombres.csv"):
     df = pd.read_csv(csv_file)
     acronym_names = df["Acronym Name"].tolist()
 
     pairedList = []
 
-    AF = [164889003]   # Atrial fibrillation
-    ST = [427084000]   # Sinus tachycardia
-    SB = [426177001]   # Sinus bradycardia
-    SR = [426783006]   # Sinus rhythm
+    AF = [164889003]
+    ST = [427084000]
+    SB = [426177001]
+    SR = [426783006]
 
     frequency_dict = [0, 0, 0, 0]  # [SR, AF, ST, SB]
 
     for i in range(len(all_meta)):
-        diagnostics = all_meta[i]["comments"][2].split(" ")[1].split(",")
+
+        dx_comment = None
+
+        for comment in all_meta[i]["comments"]:
+            if comment.startswith("Dx:"):
+                dx_comment = comment
+                break
+
+        if dx_comment is None:
+            continue
+
+        diagnostics = dx_comment.replace("Dx:", "").strip().split(",")
 
         for k in diagnostics:
-            k_int = int(k)
+            try:
+                k_int = int(k.strip())
+            except:
+                continue
 
             if k_int in SR:
                 code = 0
@@ -240,6 +295,7 @@ def get_diag(signals, all_meta, csv_file="Nombres.csv"):
 
             frequency_dict[code] += 1
             pairedList.append([signals[i], code])
+            break
 
     return pairedList, acronym_names, frequency_dict
 
@@ -717,7 +773,7 @@ def run_pairwise_bonferroni(df, save_path=None, features=None):
     return out
 
 
-def dataset_shift_tests(df1, df2, features=None, results_dir="Results/comparison/tables"):
+def dataset_shift_tests(df1, df2, features=None, results_dir=None):
     """
     Compara distribución D1 vs D2 por clase y feature.
     Usa Mann-Whitney y KS test.
@@ -726,7 +782,8 @@ def dataset_shift_tests(df1, df2, features=None, results_dir="Results/comparison
     if features is None:
         features = DEFAULT_FEATURES
 
-    os.makedirs(results_dir, exist_ok=True)
+    if results_dir is not None:
+        os.makedirs(results_dir, exist_ok=True)
     rows = []
 
     common_classes = sorted(set(df1["label"].unique()).intersection(df2["label"].unique()))
@@ -753,7 +810,8 @@ def dataset_shift_tests(df1, df2, features=None, results_dir="Results/comparison
             })
 
     out = pd.DataFrame(rows)
-    out.to_csv(os.path.join(results_dir, "D1_vs_D2_feature_shift_tests.csv"), index=False)
+    if results_dir is not None:
+        out.to_csv(os.path.join(results_dir, "D1_vs_D2_feature_shift_tests.csv"), index=False)
 
     return out
 
@@ -1057,7 +1115,7 @@ def plot_combined_boxplots(df1, df2, features, results_dir):
 
     print(f"Boxplot combinado guardado en: {save_path}")
 
-def evaluate_dnn_feature_model(df, features=None, results_dir="Results", prefix="D1"):
+def evaluate_dnn_feature_model(df, features=None, results_dir=None, prefix="D1"):
     """
     DNN simple usando únicamente features HRV.
     Sirve para evaluar si el bajo rendimiento se debe al modelo
@@ -1073,7 +1131,8 @@ def evaluate_dnn_feature_model(df, features=None, results_dir="Results", prefix=
     from tensorflow.keras.utils import to_categorical
     from tensorflow.keras.optimizers import Adam
 
-    os.makedirs(results_dir, exist_ok=True)
+    if results_dir is not None:
+        os.makedirs(results_dir, exist_ok=True)
 
     X = df[features].replace([np.inf, -np.inf], np.nan).values
     y = df["label"].values.astype(int)
@@ -1144,7 +1203,8 @@ def evaluate_dnn_feature_model(df, features=None, results_dir="Results", prefix=
     }
 
     df_metrics = pd.DataFrame([metrics])
-    df_metrics.to_csv(os.path.join(results_dir, f"{prefix}_DNN_feature_model_results.csv"), index=False)
+    if results_dir is not None:
+        df_metrics.to_csv(os.path.join(results_dir, f"{prefix}_DNN_feature_model_results.csv"), index=False)
 
     report = classification_report(
         y_test,
@@ -1154,18 +1214,19 @@ def evaluate_dnn_feature_model(df, features=None, results_dir="Results", prefix=
         zero_division=0
     )
 
-    pd.DataFrame(report).transpose().to_csv(
-        os.path.join(results_dir, f"{prefix}_DNN_classification_report.csv")
-    )
+    if results_dir is not None:
+        pd.DataFrame(report).transpose().to_csv(
+            os.path.join(results_dir, f"{prefix}_DNN_classification_report.csv")
+        )
 
-    cm = confusion_matrix(y_test, y_pred)
-    pd.DataFrame(
-        cm,
-        index=["SR", "AF", "ST", "SB"],
-        columns=["SR", "AF", "ST", "SB"]
-    ).to_csv(
-        os.path.join(results_dir, f"{prefix}_DNN_confusion_matrix.csv")
-    )
+        cm = confusion_matrix(y_test, y_pred)
+        pd.DataFrame(
+            cm,
+            index=["SR", "AF", "ST", "SB"],
+            columns=["SR", "AF", "ST", "SB"]
+        ).to_csv(
+            os.path.join(results_dir, f"{prefix}_DNN_confusion_matrix.csv")
+        )
 
     print(f"\n===== DNN FEATURE MODEL {prefix} =====")
     print(df_metrics)
